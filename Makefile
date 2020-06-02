@@ -6,26 +6,24 @@
 ########################################################################################################################
 .DEFAULT_GOAL := help
 
-.PHONY: analytics-pipeline-devstack-test analytics-pipeline-shell \
-        analyticspipeline-shell backup build-courses check-memory \
-        create-test-course credentials-shell destroy dev.cache-programs \
-        dev.check dev.checkout dev.clone dev.clone.ssh dev.down dev.kill \
-        dev.nfs.setup devpi-password dev.provision \
-        dev.provision.analytics_pipeline dev.provision.services \
+.PHONY: analytics-pipeline-devstack-test check-memory dev.backup \
+        dev.build-courses dev.cache-programs dev.check dev.checkout dev.clone \
+        dev.clone.ssh dev.create-test-course dev.destroy dev.down \
+        dev.feature-toggle-state dev.kill dev.logs dev.nfs.setup \
+        devpi-password dev.provision dev.provision.services \
         dev.provision.xqueue dev.ps dev.pull dev.repo.reset dev.reset \
-        dev.restart dev.rm-stopped dev.status dev.stop dev.sync.daemon.start \
-        dev.sync.provision dev.sync.requirements dev.sync.up dev.up dev.up.all \
-        dev.up.analytics_pipeline dev.up.watchers dev.up.with-programs \
-        discovery-shell down e2e-shell e2e-tests ecommerce-shell \
-        feature-toggle-state forum-restart-devserver healthchecks help \
-        lms-restart lms-shell lms-static lms-update-db lms-watcher-shell logs \
-        mongo-shell mysql-shell mysql-shell-edxapp provision pull \
-        pull.analytics_pipeline pull.xqueue registrar-shell requirements \
-        restore selfcheck static stats stop stop.all stop.analytics_pipeline \
-        stop.watchers stop.xqueue studio-restart studio-shell studio-static \
-        studio-update-db studio-watcher-shell update-db upgrade upgrade \
-        validate validate-lms-volume vnc-passwords xqueue_consumer-restart \
-        xqueue_consumer-shell xqueue-restart xqueue-shell
+        dev.restart dev.restore dev.rm-stopped dev.shell.analyticspipeline \
+        dev.shell.credentials dev.shell.discovery dev.shell.e2e \
+        dev.shell.ecommerce dev.shell.lms dev.shell.lms-watcher \
+        dev.shell.registrar dev.shell.studio dev.shell.studio-watcher \
+        dev.shell.xqueue dev.shell.xqueue_consumer dev.stats dev.status \
+        dev.stop dev.sync.daemon.start dev.sync.provision \
+        dev.sync.requirements dev.sync.up dev.up dev.up.watchers \
+        dev.up.with-programs dev.up.with-watchers dev.validate e2e-tests \
+        forum-restart-devserver help lms-restart lms-static lms-update-db \
+        requirements selfcheck static studio-restart studio-static \
+        studio-update-db update-db upgrade upgrade validate-lms-volume \
+        vnc-passwords xqueue_consumer-restart xqueue-restart
 
 # Include options (configurable through options.local.mk)
 include options.mk
@@ -33,9 +31,6 @@ include options.mk
 # Include local overrides to options.
 # You can use this file to configure your Devstack. It is ignored by git.
 -include options.local.mk  # Prefix with hyphen to tolerate absence of file.
-
-# Include local makefile with additional targets.
--include local.mk  # Prefix with hyphen to tolerate absence of file.
 
 # Docker Compose YAML files to define services and their volumes.
 # This environment variable tells `docker-compose` which files to load definitions
@@ -67,6 +62,7 @@ endif
 
 ifeq ($(FS_SYNC_STRATEGY),docker-sync)
 COMPOSE_FILE := docker-compose-sync.yml
+COMPOSE_FILE := docker-sync-marketing-site.yml
 endif
 
 ifndef COMPOSE_FILE
@@ -93,8 +89,20 @@ else
     DEVNULL := >/dev/null
 endif
 
-# Include specialized Make commands.
-include marketing.mk
+RED="\033[0;31m"
+YELLOW="\033[0;33m"
+GREY="\033[1;90m"
+NO_COLOR="\033[0m"
+
+# Include redundant targets as aliases to commands in this Makefile.
+# These are split out into order to make this Makefile more approachable
+# and consistent while still preserving backwards compatibility.
+include aliases.mk
+
+include completion.mk
+
+# Include local makefile with additional targets.
+-include local.mk  # Prefix with hyphen to tolerate absence of file.
 
 # Export Makefile variables to recipe shells.
 export
@@ -163,28 +171,28 @@ dev.pull.%: ## Pull latest Docker images for services (separated by plus-signs) 
 
 dev.up: dev.up.$(DEFAULT_SERVICES) check-memory ## Bring up default services.
 
-dev.up.%: | check-memory ## Bring up specific services (separated by plus-signs) and their dependencies with host volumes.
+dev.up.%: check-memory ## Bring up specific services (separated by plus-signs) and their dependencies with host volumes.
 	docker-compose up -d $$(echo $* | tr + " ")
 ifeq ($(ALWAYS_CACHE_PROGRAMS),true)
 	make dev.cache-programs
 endif
 
-dev.up.without-deps.%:  ## Bring up specific services (separated by plus-signs) without dependencies.
+dev.up.without-deps.%: check-memory ## Bring up specific services (separated by plus-signs) without dependencies.
 	docker-compose up --d --no-deps $$(echo $* | tr + " ")
 
-dev.up.with-programs: dev.up dev.cache-programs  ## Bring up a all services and cache programs in LMS.
+dev.up.with-programs: dev.up dev.cache-programs ## Bring up a all services and cache programs in LMS.
 
 dev.up.with-programs.%: dev.up.$* dev.cache-programs ## Bring up a service and its dependencies and cache programs in LMS.
 
-dev.up.watchers: check-memory dev.up.lms_watcher+studio_watcher ## Bring up asset watcher containers
+dev.up.with-watchers: dev.up dev.up.watchers ## Bring up default services with LMS and Studio asset watcher containers.
+
+dev.up.watchers: dev.up.lms_watcher+studio_watcher ## Bring up LMS and Studio asset watcher containers.
 
 dev.nfs.setup:  ## Sets up an nfs server on the /Users folder, allowing nfs mounting on docker
 	./setup_native_nfs_docker_osx.sh
 
 dev.nfs.%:
 	FS_SYNC_STRATEGY=nfs make dev.$*
-
-dev.up.all: dev.up dev.up.watchers ## Bring up all services with host volumes, including watchers
 
 # TODO: Improve or rip out Docker Sync targets.
 #       They are not well-fleshed-out and it is not clear if anyone uses them.
@@ -206,23 +214,12 @@ dev.check: dev.check.$(DEFAULT_SERVICES) ## Run checks for the default service s
 dev.check.%:  # Run checks for a given service or set of services (separated by plus-signs).
 	$(WINPTY) bash ./check.sh $*
 
-provision: | dev.provision ## This command will be deprecated in a future release, use dev.provision
-	echo "\033[0;31mThis command will be deprecated in a future release, use dev.provision\033[0m"
-
 dev.stop: ## Stop all services.
 	(test -d .docker-sync && docker-sync stop) || true ## Ignore failure here
 	docker-compose stop
 
 dev.stop.%: ## Stop specific services, separated by plus-signs.
 	docker-compose stop $$(echo $* | tr + " ")
-
-stop: dev.stop.$(DEFAULT_SERVICES)
-
-stop.watchers: dev.stop.lms_watcher+studio_watcher
-
-stop.all: dev.stop
-
-stop.xqueue: dev.stop.xqueue+xqueue_consumer
 
 dev.restart: ## Restart all services.
 	docker-compose restart $$(echo $* | tr + " ")
@@ -247,89 +244,72 @@ dev.down: ## Stop and remove all service containers and networks
 	(test -d .docker-sync && docker-sync clean) || true ## Ignore failure here
 	docker-compose down
 
-down: dev.down
-
-destroy: ## Remove all devstack-related containers, networks, and volumes
+dev.destroy: ## Remove all devstack-related containers, networks, and volumes
 	$(WINPTY) bash ./destroy.sh
 
-logs: ## View logs from containers running in detached mode
+dev.logs:  ## View logs from containers running in detached mode.
 	docker-compose logs -f
 
-%-logs: ## View the logs of the specified service container
+dev.logs.%: ## View the logs of the specified service container
 	docker-compose logs -f --tail=500 $*
 
-RED="\033[0;31m"
-YELLOW="\033[0;33m"
-GREY="\033[1;90m"
-NO_COLOR="\033[0m"
-
-pull: dev.pull
-	@echo -n $(RED)
-	@echo "******************* PLEASE NOTE ********************************"
-	@echo -n $(YELLOW)
-	@echo "The 'make pull' command is deprecated."
-	@echo "Please use 'make dev.pull.<service>'."
-	@echo "It will pull all the images that the given serivce depends upon."
-	@echo "Example: "
-	@echo "----------------------------------"
-	@echo -n $(GREY)
-	@echo "~/devstack$$ make dev.pull.lms"
-	@echo "   Pulling chrome        ... done"
-	@echo "   Pulling firefox       ... done"
-	@echo "   Pulling memcached     ... done"
-	@echo "   Pulling mongo         ... done"
-	@echo "   Pulling mysql         ... done"
-	@echo "   Pulling elasticsearch ... done"
-	@echo "   Pulling discovery     ... done"
-	@echo "   Pulling forum         ... done"
-	@echo "   Pulling devpi         ... done"
-	@echo "   Pulling lms           ... done"
-	@echo "~/devstack$$"
-	@echo -n $(YELLOW)
-	@echo "----------------------------------"
-	@echo "If you must pull all images, such as for initial"
-	@echo "provisioning, run 'make dev.pull'."
-	@echo -n $(RED)
-	@echo "****************************************************************"
-	@echo -n $(NO_COLOR)
-
-pull.xqueue: dev.pull.without-deps.xqueue+xqueue_consumer
-
-validate: ## Validate the devstack configuration
+dev.validate: ## Validate the devstack configuration
 	docker-compose config
 
-backup: dev.up.mysql+mongo+elasticsearch ## Write all data volumes to the host.
+dev.backup: dev.up.mysql+mongo+elasticsearch ## Write all data volumes to the host.
 	docker run --rm --volumes-from $$(make -s dev.print-container.mysql) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mysql.tar.gz /var/lib/mysql
 	docker run --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mongo.tar.gz /data/db
 	docker run --rm --volumes-from $$(make -s dev.print-container.elasticsearch) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/elasticsearch.tar.gz /usr/share/elasticsearch/data
 
-restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from the host. WARNING: THIS WILL OVERWRITE ALL EXISTING DATA!
+dev.restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from the host. WARNING: THIS WILL OVERWRITE ALL EXISTING DATA!
 	docker run --rm --volumes-from $$(make -s dev.print-container.mysql) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/mysql.tar.gz
 	docker run --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/mongo.tar.gz
 	docker run --rm --volumes-from $$(make -s dev.print-container.elasticsearch) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/elasticsearch.tar.gz
 
-# TODO: Print out help for this target. Even better if we can iterate over the
-# services in docker-compose.yml, and print the actual service names.
-%-shell: ## Run a shell on the specified service container
-	docker-compose exec $* /bin/bash
-
-analyticspipeline-shell: ## Run a shell on the analytics pipeline container
+dev.shell.analyticspipeline: ## Run a shell on the analytics pipeline container
 	docker-compose exec analyticspipeline env TERM=$(TERM) /edx/app/analytics_pipeline/devstack.sh open
 
-credentials-shell: ## Run a shell on the credentials container
+dev.shell.credentials: ## Run a shell on the credentials container
 	docker-compose exec credentials env TERM=$(TERM) bash -c 'source /edx/app/credentials/credentials_env && cd /edx/app/credentials/credentials && /bin/bash'
 
-discovery-shell: ## Run a shell on the discovery container
+dev.shell.discovery: ## Run a shell on the discovery container
 	docker-compose exec discovery env TERM=$(TERM) /edx/app/discovery/devstack.sh open
 
-ecommerce-shell: ## Run a shell on the ecommerce container
+dev.shell.ecommerce: ## Run a shell on the ecommerce container
 	docker-compose exec ecommerce env TERM=$(TERM) /edx/app/ecommerce/devstack.sh open
 
-e2e-shell: ## Start the end-to-end tests container with a shell
+dev.shell.e2e: ## Start the end-to-end tests container with a shell
 	docker run -it --network=${COMPOSE_PROJECT_NAME:-devstack}_default -v ${DEVSTACK_WORKSPACE}/edx-e2e-tests:/edx-e2e-tests -v ${DEVSTACK_WORKSPACE}/edx-platform:/edx-e2e-tests/lib/edx-platform --env-file ${DEVSTACK_WORKSPACE}/edx-e2e-tests/devstack_env edxops/e2e env TERM=$(TERM) bash
 
-registrar-shell: ## Run a shell on the registrar site container
+dev.shell.registrar: ## Run a shell on the registrar site container
 	docker-compose exec registrar env TERM=$(TERM) /edx/app/registrar/devstack.sh open
+
+dev.shell.xqueue: ## Run a shell on the XQueue container
+	docker-compose exec xqueue env TERM=$(TERM) /edx/app/xqueue/devstack.sh open
+
+dev.shell.lms: ## Run a shell on the LMS container
+	docker-compose exec lms env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
+
+dev.shell.lms-watcher: ## Run a shell on the LMS watcher container
+	docker-compose exec lms_watcher env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
+
+dev.shell.studio: ## Run a shell on the Studio container
+	docker-compose exec studio env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
+
+dev.shell.studio-watcher: ## Run a shell on the studio watcher container
+	docker-compose exec studio_watcher env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
+
+dev.shell.xqueue_consumer: ## Run a shell on the XQueue consumer container
+	docker-compose exec xqueue_consumer env TERM=$(TERM) /edx/app/xqueue/devstack.sh open
+
+dev.shell.mysql.%: ## Run a mysql shell on the edxapp database
+	docker-compose exec mysql bash -c "mysql $*"
+
+dev.shell.marketing: ## Run a shell on the marketing site container
+	docker-compose exec marketing env TERM=$(TERM) bash -c 'cd /edx/app/edx-mktg/edx-mktg; exec /bin/bash -sh'
+
+dev.shell.%: ## Run a shell on the specified service container.
+	docker-compose exec $* /bin/bash
 
 %-update-db: ## Run migrations for the specified service container
 	docker-compose exec $* bash -c 'source /edx/app/$*/$*_env && cd /edx/app/$*/$*/ && make migrate'
@@ -345,35 +325,17 @@ update-db: | $(DB_MIGRATION_TARGETS) ## Run the migrations for DEFAULT_SERVICES
 forum-restart-devserver: ## Kill the forum's Sinatra development server. The watcher process will restart it.
 	docker-compose exec forum bash -c 'kill $$(ps aux | grep "ruby app.rb" | egrep -v "while|grep" | awk "{print \$$2}")'
 
-lms-shell: ## Run a shell on the LMS container
-	docker-compose exec lms env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
-
-lms-watcher-shell: ## Run a shell on the LMS watcher container
-	docker-compose exec lms_watcher env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
-
 %-attach: ## Attach to the specified service container process to use the debugger & see logs.
 	docker attach "$$(make --silent dev.print-container.$*)"
 
 lms-restart: lms-restart-devserver
 
-studio-shell: ## Run a shell on the Studio container
-	docker-compose exec studio env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
-
-studio-watcher-shell: ## Run a shell on the studio watcher container
-	docker-compose exec studio_watcher env TERM=$(TERM) /edx/app/edxapp/devstack.sh open
-
 studio-restart: studio-restart-devserver
-
-xqueue-shell: ## Run a shell on the XQueue container
-	docker-compose exec xqueue env TERM=$(TERM) /edx/app/xqueue/devstack.sh open
 
 xqueue-restart: xqueue-restart-devserver
 
 %-restart-devserver: ## Kill a service's Django development server. The watcher process should restart it.
 	docker-compose exec $* bash -c 'kill $$(ps aux | egrep "manage.py ?\w* runserver" | egrep -v "while|grep" | awk "{print \$$2}")'
-
-xqueue_consumer-shell: ## Run a shell on the XQueue consumer container
-	docker-compose exec xqueue_consumer env TERM=$(TERM) /edx/app/xqueue/devstack.sh open
 
 xqueue_consumer-restart: ## Kill the XQueue development server. The watcher process will restart it.
 	docker-compose exec xqueue_consumer bash -c 'kill $$(ps aux | grep "manage.py run_consumer" | egrep -v "while|grep" | awk "{print \$$2}")'
@@ -388,10 +350,6 @@ studio-static: ## Rebuild static assets for the Studio container
 	docker-compose exec studio bash -c 'source /edx/app/edxapp/edxapp_env && cd /edx/app/edxapp/edx-platform/ && paver update_assets studio'
 
 static: | credentials-static discovery-static ecommerce-static lms-static studio-static ## Rebuild static assets for all service containers
-
-healthchecks: dev.check.$(DEFAULT_SERVICES)
-
-healthchecks.%: dev.check.%
 
 e2e-tests: ## Run the end-to-end tests against the service containers
 	docker run -t --network=${COMPOSE_PROJECT_NAME:-devstack}_default -v ${DEVSTACK_WORKSPACE}/edx-e2e-tests:/edx-e2e-tests -v ${DEVSTACK_WORKSPACE}/edx-platform:/edx-e2e-tests/lib/edx-platform --env-file ${DEVSTACK_WORKSPACE}/edx-e2e-tests/devstack_env edxops/e2e env TERM=$(TERM)  bash -c 'paver e2e_test --exclude="whitelabel\|enterprise"'
@@ -408,51 +366,32 @@ vnc-passwords: ## Get the VNC passwords for the Chrome and Firefox Selenium cont
 devpi-password: ## Get the root devpi password for the devpi container
 	docker-compose exec devpi bash -c "cat /data/server/.serverpassword"
 
-mysql-shell: ## Run a shell on the mysql container
-	docker-compose exec mysql bash
-
-mysql-shell-edxapp: ## Run a mysql shell on the edxapp database
-	docker-compose exec mysql bash -c "mysql edxapp"
-
-mongo-shell: ## Run a shell on the mongo container
-	docker-compose exec mongo bash
-
-dev.provision.analytics_pipeline: dev.provision.services.analyticspipeline
-
-analytics-pipeline-shell: analyticspipeline-shell
-
-dev.up.analytics_pipeline: dev.up.analyticspipeline ## Bring up analytics pipeline services
-
-pull.analytics_pipeline: dev.pull.analyticspipeline ## Update analytics pipeline docker images
-
 analytics-pipeline-devstack-test: ## Run analytics pipeline tests in travis build
 	docker-compose exec -u hadoop -T analyticspipeline bash -c 'sudo chown -R hadoop:hadoop /edx/app/analytics_pipeline && source /edx/app/hadoop/.bashrc && make develop-local && make docker-test-acceptance-local ONLY_TESTS=edx.analytics.tasks.tests.acceptance.test_internal_reporting_database && make docker-test-acceptance-local ONLY_TESTS=edx.analytics.tasks.tests.acceptance.test_user_activity'
-
-stop.analytics_pipeline: dev.stop.namenode+datanode+resourcemanager+nodemanager+sparkmaster+sparkworker+vertica+analyticspipeline ## Stop all Analytics pipeline services.
 
 hadoop-application-logs-%: ## View hadoop logs by application Id
 	docker-compose exec nodemanager yarn logs -applicationId $*
 
 # Provisions studio, ecommerce, and marketing with course(s) in test-course.json
 # Modify test-course.json before running this make target to generate a custom course
-create-test-course: ## NOTE: marketing course creation is not available for those outside edX
+dev.create-test-course: ## NOTE: marketing course creation is not available for those outside edX
 	$(WINPTY) bash ./course-generator/create-courses.sh --studio --ecommerce --marketing course-generator/test-course.json
 
 # Run the course json builder script and use the outputted course json to provision studio, ecommerce, and marketing
 # Modify the list of courses in build-course-json.sh beforehand to generate custom courses
-build-courses: ## NOTE: marketing course creation is not available for those outside edX
+dev.build-courses: ## NOTE: marketing course creation is not available for those outside edX
 	$(WINPTY) bash ./course-generator/build-course-json.sh course-generator/tmp-config.json
 	$(WINPTY) bash ./course-generator/create-courses.sh --studio --ecommerce --marketing course-generator/tmp-config.json
 	rm course-generator/tmp-config.json
 
-check-memory: ## Check if enough memory has been allocated to Docker
-	@if [ `docker info --format '{{.MemTotal}}'` -lt 2095771648 ]; then echo "\033[0;31mWarning, System Memory is set too low!!! Increase Docker memory to be at least 2 Gigs\033[0m"; fi || exit 0
-
-stats: ## Get per-container CPU and memory utilization data
+dev.stats: ## Get per-container CPU and memory utilization data
 	docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 
-feature-toggle-state: ## Gather the state of feature toggles configured for various IDAs
+dev.feature-toggle-state: ## Gather the state of feature toggles configured for various IDAs
 	$(WINPTY) bash ./gather-feature-toggle-state.sh
+
+check-memory: ## Check if enough memory has been allocated to Docker
+	@if [ `docker info --format '{{.MemTotal}}'` -lt 2095771648 ]; then echo "\033[0;31mWarning, System Memory is set too low!!! Increase Docker memory to be at least 2 Gigs\033[0m"; fi || exit 0
 
 selfcheck: ## check that the Makefile is well-formed
 	@echo "The Makefile is well-formed."
