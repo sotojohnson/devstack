@@ -94,12 +94,13 @@ YELLOW="\033[0;33m"
 GREY="\033[1;90m"
 NO_COLOR="\033[0m"
 
+# TODO document
+include completion.mk
+
 # Include redundant targets as aliases to commands in this Makefile.
 # These are split out into order to make this Makefile more approachable
 # and consistent while still preserving backwards compatibility.
 include aliases.mk
-
-include completion.mk
 
 # Include local makefile with additional targets.
 -include local.mk  # Prefix with hyphen to tolerate absence of file.

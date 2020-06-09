@@ -8,7 +8,7 @@
 
 ALIAS_MSG_COL=\033[1;34m# Bold blue
 ALIAS_CMD_COL=\033[1;36m# Bold cyan
-NO_COL=\033[0m
+NO_COL=\033[0m 
 
 alias_%:
 	@printf "$${ALIAS_MSG_COL}%s $${ALIAS_CMD_COL}%s$${NO_COL}\n" \
@@ -67,5 +67,8 @@ build-courses: alias_dev.build-courses
 
 logs: alias_dev.logs
 
+%-shell: alias_dev.shell.%
+	#make alias_dev.$*.shell
+
 mysql-shell-%:
-	make alias_alias_dev.shell.mysql.$*
+	make alias_dev.shell.mysql.%
