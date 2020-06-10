@@ -4,6 +4,8 @@
 #   - If you are adding a new service make sure the dev.reset target will fully reset said service.
 #
 ########################################################################################################################
+# TODO document.
+
 .DEFAULT_GOAL := help
 
 .PHONY: analytics-pipeline-devstack-test dev.check-memory dev.backup \
@@ -31,12 +33,12 @@ YELLOW="\033[0;33m"
 GREY="\033[1;90m"
 NO_COLOR="\033[0m"
 
-# Include options (configurable through options.local.mk)
+# Load up options (configurable through options.local.mk)
 include options.mk
 
 # This is equal to DEFAULT_SERVICES, but separated with plus signs,
 # as commands like `make dev.up.%` and `make dev.pull.%` expect.
-DEFAULT_SERVICE_LIST = $(subst  ,+,$(DEFAULT_SERVICES))
+DEFAULT_SERVICE_LIST := $(subst  ,+,$(DEFAULT_SERVICES))
 
 # Docker Compose YAML files to define services and their volumes.
 # This environment variable tells `docker-compose` which files to load definitions
@@ -98,10 +100,10 @@ endif
 # Export Makefile variables to recipe shells.
 export
 
-# Include redundant targets as aliases to commands in this Makefile.
-# These are split out into order to make this Makefile more approachable
-# and consistent while still preserving backwards compatibility.
-include aliases.mk
+# Aliases from old Devstack commands to the ones in this Makefile.
+# This allows us to evolve and tidy up the Devstack interface without removing support
+# for existing scripts and workflows.
+include compatibility.mk
 
 # Include local makefile with additional targets.
 -include local.mk  # Prefix with hyphen to tolerate absence of file.
@@ -114,7 +116,7 @@ include aliases.mk
 # Generates a help message. Borrowed from https://github.com/pydanny/cookiecutter-djangopackage.
 help: ## Display this help message
 	@echo "Please use \`make <target>' where <target> is one of"
-	@awk -F ':.*?## ' '/^[a-zA-Z]/ && NF==2 {printf "\033[36m  %-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
+	@awk -F ':.*?## ' '/^[a-zA-Z]/ && NF==2 {printf "\033[36m  %-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 requirements: ## Install requirements
 	pip install -r requirements/base.txt
@@ -130,62 +132,42 @@ selfcheck: ## check that the Makefile is well-formed
 
 
 #####################################################################
-# Developer interface: System queries and checks.
+# Developer interface: Repository management.
 #####################################################################
 
-dev.check-memory: ## Check if enough memory has been allocated to Docker
-	@if [ `docker info --format '{{.MemTotal}}'` -lt 2095771648 ]; then echo "\033[0;31mWarning, System Memory is set too low!!! Increase Docker memory to be at least 2 Gigs\033[0m"; fi || exit 0
-
-dev.stats: ## Get per-container CPU and memory utilization data
-	docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
-
-dev.print-container.%: ## Get the ID of the running container for a given service. Run with ``make --silent`` for just ID.
-	@echo $$(docker-compose ps --quiet $*)
-
-dev.ps: ## View list of created services and their statuses.
-	docker-compose ps
-
-dev.check: dev.check.$(DEFAULT_SERVICE_LIST) ## Run checks for the default service set.
-
-dev.check.%:  # Run checks for a given service or set of services (separated by plus-signs).
-	$(WINPTY) bash ./check.sh $*
-
-dev.validate-config: ## Validate the devstack configuration
-	docker-compose config
+dev.reset-repos: ## Attempt to reset the local repo checkouts to the master working state.
+	$(WINPTY) bash ./repo.sh reset
 
 dev.status: ## Prints the status of all git repositories
 	$(WINPTY) bash ./repo.sh status
 
+dev.checkout: ## Check out "openedx-release/$OPENEDX_RELEASE" in each repo if set, "master" otherwise
+	./repo.sh checkout
 
-########################################################################################
-# Developer interface: Support for alternative file synchronization strategies.
-########################################################################################
 
-dev.nfs.setup:  ## Sets up an nfs server on the /Users folder, allowing nfs mounting on docker
-	./setup_native_nfs_docker_osx.sh
+dev.clone: ## Clone service repos using HTTPS method to the parent directory
+	./repo.sh clone
 
-dev.nfs.%:
-	FS_SYNC_STRATEGY=nfs make dev.$*
-
-# TODO: Improve or rip out Docker Sync targets.
-#       They are not well-fleshed-out and it is not clear if anyone uses them.
-
-dev.sync.daemon.start: ## Start the docker-sycn daemon
-	docker-sync start
-
-dev.sync.provision: dev.sync.daemon.start ## Provision with docker-sync enabled
-	FS_SYNC_STRATEGY=docker-sync make dev.provision
-
-dev.sync.requirements: ## Install requirements
-	gem install docker-sync
-
-dev.sync.up: dev.sync.daemon.start ## Bring up all services with docker-sync enabled
-	FS_SYNC_STRATEGY=docker-sync make dev.up
+dev.clone.ssh: ## Clone service repos using SSH method to the parent directory
+	./repo.sh clone_ssh
 
 
 ########################################################################################
-# Developer interface: Setting-up, backing-up, restoring, and destroying.
+# Developer interface: Docker image management.
 ########################################################################################
+
+dev.pull: dev.pull.$(DEFAULT_SERVICE_LIST) ## Pull Docker images required by default services.
+
+dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by plus-signs).
+	docker-compose pull $$(echo $* | tr + " ")
+
+dev.pull.%: ## Pull latest Docker images for services (separated by plus-signs) and all their dependencies.
+	docker-compose pull --include-deps $$(echo $* | tr + " ")
+
+
+#####################################################################
+# Developer interface: Database management.
+#####################################################################
 
 dev.provision: dev.check-memory dev.clone.ssh dev.provision.services stop ## Provision dev environment with default services, and then stop them.
 	# We provision all default services as well as 'e2e' (end-to-end tests).
@@ -198,11 +180,6 @@ dev.provision: dev.check-memory dev.clone.ssh dev.provision.services stop ## Pro
 dev.provision.%: ## Provision specified services with local mounted directories, separated by plus signs.
 	$(WINPTY) bash ./provision.sh $*
 
-dev.reset: dev.down dev.reset.repos dev.pull dev.up dev.static dev.migrate ## Attempt to reset the local devstack to the master working state.
-
-dev.reset.repos: ## Attempt to reset the local repo checkouts to the master working state.
-	$(WINPTY) bash ./repo.sh reset
-
 dev.backup: dev.up.mysql+mongo+elasticsearch ## Write all data volumes to the host.
 	docker run --rm --volumes-from $$(make -s dev.print-container.mysql) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mysql.tar.gz /var/lib/mysql
 	docker runsql --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mongo.tar.gz /data/db
@@ -212,31 +189,6 @@ dev.restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from t
 	docker run --rm --volumes-from $$(make -s dev.print-container.mysql) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/mysql.tar.gz
 	docker run --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/mongo.tar.gz
 	docker run --rm --volumes-from $$(make -s dev.print-container.elasticsearch) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zxvf /backup/elasticsearch.tar.gz
-
-dev.destroy: ## Irreversibly remove all devstack-related containers, networks, and volumes.
-	$(WINPTY) bash ./destroy.sh
-
-dev.clone: ## Clone service repos using HTTPS method to the parent directory
-	./repo.sh clone
-
-dev.clone.ssh: ## Clone service repos using SSH method to the parent directory
-	./repo.sh clone_ssh
-
-
-########################################################################################
-# Developer interface: Routine updates to code, environment, and data.
-########################################################################################
-
-dev.checkout: ## Check out "openedx-release/$OPENEDX_RELEASE" in each repo if set, "master" otherwise
-	./repo.sh checkout
-
-dev.pull: dev.pull.$(DEFAULT_SERVICE_LIST) ## Pull Docker images required by default services.
-
-dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by plus-signs).
-	docker-compose pull $$(echo $* | tr + " ")
-
-dev.pull.%: ## Pull latest Docker images for services (separated by plus-signs) and all their dependencies.
-	docker-compose pull --include-deps $$(echo $* | tr + " ")
 
 # List of Makefile targets to run database migrations, in the form dev.migrate.$(service)
 # Services will only have their migrations added here
@@ -259,7 +211,7 @@ dev.migrate.%: ## Run migrations on the specified service.
 
 
 ########################################################################################
-# Developer interface: Container management (starting, stopping, etc.)
+# Developer interface: Container management.
 ########################################################################################
 
 dev.up: dev.up.$(DEFAULT_SERVICE_LIST)## Bring up default services.
@@ -283,18 +235,24 @@ dev.up.with-watchers.%: ## Bring up default services with LMS and Studio asset w
 dev.up.without-deps.%: dev.check-memory ## Bring up specific services (separated by plus-signs) without starting dependent services.
 	docker-compose up --d --no-deps $$(echo $* | tr + " ")
 
+dev.ps: ## View list of created services and their statuses.
+	docker-compose ps
+
+dev.print-container.%: ## Get the ID of the running container for a given service. Run with ``make --silent`` for just ID.
+	@echo $$(docker-compose ps --quiet $*)
+
+dev.restart-containers: ## Restart all service containers.
+	docker-compose restart $$(echo $* | tr + " ")
+
+dev.restart-containers.%: ## Restart specific services' containers, separated by plus-signs.
+	docker-compose restart $$(echo $* | tr + " ")
+
 dev.stop: ## Stop all services.
 	(test -d .docker-sync && docker-sync stop) || true ## Ignore failure here
 	docker-compose stop
 
 dev.stop.%: ## Stop specific services, separated by plus-signs.
 	docker-compose stop $$(echo $* | tr + " ")
-
-dev.restart-service: ## Restart all services.
-	docker-compose restart $$(echo $* | tr + " ")
-
-dev.restart-service.%: ## Restart specific services, separated by plus-signs.
-	docker-compose restart $$(echo $* | tr + " ")
 
 dev.kill: ## Kill all services.
 	(test -d .docker-sync && docker-sync stop) || true ## Ignore failure here
@@ -314,9 +272,30 @@ dev.down: ## Stop and remove all service containers and networks
 	docker-compose down
 
 
+#####################################################################
+# Developer interface: System queries and checks.
+#####################################################################
+
+dev.check-memory: ## Check if enough memory has been allocated to Docker
+	@if [ `docker info --format '{{.MemTotal}}'` -lt 2095771648 ]; then echo "\033[0;31mWarning, System Memory is set too low!!! Increase Docker memory to be at least 2 Gigs\033[0m"; fi || exit 0
+
+dev.stats: ## Get per-container CPU and memory utilization data
+	docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+
+
+dev.check: dev.check.$(DEFAULT_SERVICE_LIST) ## Run checks for the default service set.
+
+dev.check.%:  # Run checks for a given service or set of services (separated by plus-signs).
+	$(WINPTY) bash ./check.sh $*
+
+dev.validate-config: ## Validate the devstack configuration
+	docker-compose config
+
+
 ########################################################################################
 # Developer interface: Runtime service management (caching, logs, shells).
 ########################################################################################
+
 dev.cache-programs: ## Copy programs from Discovery to Memcached for use in LMS.
 	$(WINPTY) bash ./programs/provision.sh cache
 
@@ -398,6 +377,67 @@ dev.static.studio:  ## Rebuild static assets for the Studio container
 
 dev.static.%: ## Rebuild static assets for the specified service container
 	docker-compose exec $* bash -c 'source /edx/app/$*/$*_env && cd /edx/app/$*/$*/ && make static'
+
+
+########################################################################################
+# Developer interface: Commands that do a range of things.
+########################################################################################
+
+dev.reset: dev.down dev.reset-repos dev.pull dev.up dev.static dev.migrate ## Attempt to reset the local devstack to the master working state without destroying data.
+
+dev.destroy: ## Irreversibly remove all devstack-related containers, networks, and volumes.
+	$(WINPTY) bash ./destroy.sh
+
+
+########################################################################################
+# Developer interface: Support for alternative file synchronization strategies.
+########################################################################################
+
+dev.nfs.setup:  ## Sets up an nfs server on the /Users folder, allowing nfs mounting on docker
+	./setup_native_nfs_docker_osx.sh
+
+dev.nfs.%:
+	FS_SYNC_STRATEGY=nfs make dev.$*
+
+# TODO: Improve or rip out Docker Sync targets.
+#       They are not well-fleshed-out and it is not clear if anyone uses them.
+
+dev.sync.daemon.start: ## Start the docker-sycn daemon
+	docker-sync start
+
+dev.sync.provision: dev.sync.daemon.start ## Provision with docker-sync enabled
+	FS_SYNC_STRATEGY=docker-sync make dev.provision
+
+dev.sync.requirements: ## Install requirements
+	gem install docker-sync
+
+dev.sync.up: dev.sync.daemon.start ## Bring up all services with docker-sync enabled
+	FS_SYNC_STRATEGY=docker-sync make dev.up
+
+
+########################################################################################
+# Support for prefix form:
+#     $service-$action instead of dev.$action.$services
+# For example, the command:
+#     make dev.attach.registrar
+# can be expressed as:
+#     make registrar-attach
+# This form may be quicker to type and more amenable to tab-completion.
+########################################################################################
+
+$(addsuffix -logs, $(ALL_SERVICES)): %-logs: dev.logs.%
+
+$(addsuffix -shell, $(ALL_SERVICES)): %-shell: dev.shell.%
+
+$(addsuffix -dbshell, $(DB_SERVICES)): %-dbshell: dev.dbshell.%
+
+$(addsuffix -migrate, $(DB_SERVICES)): %-migrate: dev.migrate.%
+
+$(addsuffix -restart-container, $(DB_SERVICES)): %-restart-container: dev.restart-containers.%
+
+$(addsuffix -restart-devserver, $(ALL_SERVICES)): %-restart-devserver: dev.restart-devserver.%
+
+$(addsuffix -attach, $(ALL_SERVICES)): %-attach: dev.attach.%
 
 
 #####################################################################
