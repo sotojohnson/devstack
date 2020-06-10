@@ -36,9 +36,11 @@ NO_COLOR="\033[0m"
 # Load up options (configurable through options.local.mk)
 include options.mk
 
-# This is equal to DEFAULT_SERVICES, but separated with plus signs,
-# as commands like `make dev.up.%` and `make dev.pull.%` expect.
-DEFAULT_SERVICE_LIST := $(subst  ,+,$(DEFAULT_SERVICES))
+# These `*_SERVICES_LIST` variables are equivalent to their `*_SERVICES` counterparts,
+# but with spaces for separators instead of plus-signs.
+DEFAULT_SERVICES_LIST := $(subst +, ,$(DEFAULT_SERVICES))
+DB_SERVICES_LIST := $(subst +, ,$(DB_SERVICES))
+ASSET_SERVICES_LIST := $(subst +, ,$(ASSET_SERVICES))
 
 # Docker Compose YAML files to define services and their volumes.
 # This environment variable tells `docker-compose` which files to load definitions
@@ -116,7 +118,7 @@ include compatibility.mk
 # Generates a help message. Borrowed from https://github.com/pydanny/cookiecutter-djangopackage.
 help: ## Display this help message
 	@echo "Please use \`make <target>' where <target> is one of"
-	@awk -F ':.*?## ' '/^[a-zA-Z]/ && NF==2 {printf "\033[36m  %-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk -F ':.*?## ' '/^[a-zA-Z]/ && NF==2 {printf "\033[36m  %-25s\033[0m %s\n", $$1, $$2}'
 
 requirements: ## Install requirements
 	pip install -r requirements/base.txt
@@ -156,7 +158,7 @@ dev.clone.ssh: ## Clone service repos using SSH method to the parent directory
 # Developer interface: Docker image management.
 ########################################################################################
 
-dev.pull: dev.pull.$(DEFAULT_SERVICE_LIST) ## Pull Docker images required by default services.
+dev.pull: dev.pull.$(DEFAULT_SERVICES) ## Pull Docker images required by default services.
 
 dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by plus-signs).
 	docker-compose pull $$(echo $* | tr + " ")
@@ -171,10 +173,10 @@ dev.pull.%: ## Pull latest Docker images for services (separated by plus-signs) 
 
 dev.provision: dev.check-memory dev.clone.ssh dev.provision.services stop ## Provision dev environment with default services, and then stop them.
 	# We provision all default services as well as 'e2e' (end-to-end tests).
-	# e2e is not part of `DEFAULT_SERVICE_LIST` because it isn't a service;
+	# e2e is not part of `DEFAULT_SERVICES` because it isn't a service;
 	# it's just a way to tell ./provision.sh that the fake data for end-to-end
 	# tests should be prepared.
-	$(WINPTY) bash ./provision.sh $(DEFAULT_SERVICE_LIST)+e2e
+	$(WINPTY) bash ./provision.sh $(DEFAULT_SERVICES)+e2e
 	make dev.stop	
 
 dev.provision.%: ## Provision specified services with local mounted directories, separated by plus signs.
@@ -192,10 +194,10 @@ dev.restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from t
 
 # List of Makefile targets to run database migrations, in the form dev.migrate.$(service)
 # Services will only have their migrations added here
-# if the service is present in both $(DEFAULT_SERVICES) and $(DB_SERVICES).
+# if the service is present in both $(DEFAULT_SERVICES_LIST) and $(DB_SERVICES_LIST).
 DB_MIGRATION_TARGETS = \
-$(foreach db_service,$(DB_SERVICES),\
-	$(if $(filter $(db_service), $(DEFAULT_SERVICES)),\
+$(foreach db_service,$(DB_SERVICES_LIST),\
+	$(if $(filter $(db_service), $(DEFAULT_SERVICES_LIST)),\
 		dev.migrate.$(db_service)))
 
 dev.migrate: | $(DB_MIGRATION_TARGETS)
@@ -214,7 +216,7 @@ dev.migrate.%: ## Run migrations on the specified service.
 # Developer interface: Container management.
 ########################################################################################
 
-dev.up: dev.up.$(DEFAULT_SERVICE_LIST)## Bring up default services.
+dev.up: dev.up.$(DEFAULT_SERVICES) ## Bring up default services.
 
 dev.up.%: dev.check-memory ## Bring up specific services (separated by plus-signs) and their dependencies with host volumes.
 	docker-compose up -d $$(echo $* | tr + " ")
@@ -222,11 +224,14 @@ ifeq ($(ALWAYS_CACHE_PROGRAMS),true)
 	make dev.cache-programs
 endif
 
+dev.up.attach.%: ## Bring up specific service and its dependencies and attach to it.
+	docker-compose up $*
+
 dev.up.with-programs: dev.up dev.cache-programs ## Bring up a all services and cache programs in LMS.
 
 dev.up.with-programs.%: dev.up.$* dev.cache-programs ## Bring up a service and its dependencies and cache programs in LMS.
 
-dev.up.with-watchers: dev.up.$(DEFAULT_SERVICE_LIST)+lms_watcher+studio_watcher ## Bring up default services with LMS and Studio asset watcher containers.
+dev.up.with-watchers: dev.up.$(DEFAULT_SERVICES)+lms_watcher+studio_watcher ## Bring up default services with LMS and Studio asset watcher containers.
 
 dev.up.with-watchers.%: ## Bring up default services with LMS and Studio asset watcher containers.
 	make dev.up.$*
@@ -282,8 +287,7 @@ dev.check-memory: ## Check if enough memory has been allocated to Docker
 dev.stats: ## Get per-container CPU and memory utilization data
 	docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 
-
-dev.check: dev.check.$(DEFAULT_SERVICE_LIST) ## Run checks for the default service set.
+dev.check: dev.check.$(DEFAULT_SERVICES) ## Run checks for the default service set.
 
 dev.check.%:  # Run checks for a given service or set of services (separated by plus-signs).
 	$(WINPTY) bash ./check.sh $*
@@ -416,7 +420,7 @@ dev.sync.up: dev.sync.daemon.start ## Bring up all services with docker-sync ena
 
 
 ########################################################################################
-# Support for prefix form:
+# Support for "service-prefix" form:
 #     $service-$action instead of dev.$action.$services
 # For example, the command:
 #     make dev.attach.registrar
@@ -425,19 +429,19 @@ dev.sync.up: dev.sync.daemon.start ## Bring up all services with docker-sync ena
 # This form may be quicker to type and more amenable to tab-completion.
 ########################################################################################
 
-$(addsuffix -logs, $(ALL_SERVICES)): %-logs: dev.logs.%
+$(addsuffix -logs, $(ALL_SERVICES_LIST)): %-logs: dev.logs.%
 
-$(addsuffix -shell, $(ALL_SERVICES)): %-shell: dev.shell.%
+$(addsuffix -shell, $(ALL_SERVICES_LIST)): %-shell: dev.shell.%
 
-$(addsuffix -dbshell, $(DB_SERVICES)): %-dbshell: dev.dbshell.%
+$(addsuffix -dbshell, $(DB_SERVICES_LIST)): %-dbshell: dev.dbshell.%
 
-$(addsuffix -migrate, $(DB_SERVICES)): %-migrate: dev.migrate.%
+$(addsuffix -migrate, $(DB_SERVICES_LIST)): %-migrate: dev.migrate.%
 
-$(addsuffix -restart-container, $(DB_SERVICES)): %-restart-container: dev.restart-containers.%
+$(addsuffix -restart-container, $(DB_SERVICES_LIST)): %-restart-container: dev.restart-containers.%
 
-$(addsuffix -restart-devserver, $(ALL_SERVICES)): %-restart-devserver: dev.restart-devserver.%
+$(addsuffix -restart-devserver, $(ALL_SERVICES_LIST)): %-restart-devserver: dev.restart-devserver.%
 
-$(addsuffix -attach, $(ALL_SERVICES)): %-attach: dev.attach.%
+$(addsuffix -attach, $(ALL_SERVICES_LIST)): %-attach: dev.attach.%
 
 
 #####################################################################
@@ -479,3 +483,9 @@ build-courses: ## NOTE: marketing course creation is not available for those out
 
 feature-toggle-state: ## Gather the state of feature toggles configured for various IDAs
 	$(WINPTY) bash ./gather-feature-toggle-state.sh
+
+up-marketing-sync:  ## Bring up all services (including the marketing site) with docker-sync
+	docker-sync-stack start -c docker-sync-marketing-site.yml
+
+clean-marketing-sync:   ## Remove the docker-sync containers for all services (including the marketing site)
+	docker-sync-stack clean -c docker-sync-marketing-site.yml

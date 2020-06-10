@@ -6,9 +6,10 @@
 
 # In order to keep this file simple and predictable, please follow these rules
 # when adding targets:
-#  * Do not add targets with bodies. If the target cannnot be expressed using
-#    solely targets from the main Makefile as dependencies, then it probably
-#    does not belong here.
+#  * If a target has a body, all it should do is echo a message to the user
+#    explaining that the command is deprecated.
+#    If the target's functionliaty cannnot be expressed entirely using dependencies,
+#    then it probably shouldn't be here.
 #  * Dependencies should be from the main Makefile, not this one.
 #    That'll keep it easier for us to remove targets altogether if we wish to.
 #  * Keep targets in alphabetical order.
@@ -24,13 +25,13 @@
 # Generic tagets.
 #####################################################################
 
-$(addsuffix -update-db, $(DB_SERVICES)): %-update-db: %-migrate
+$(addsuffix -update-db, $(DB_SERVICES_LIST)): %-update-db: %-migrate
 
-$(addprefix mysql-shell-, $(DB_SERVICES)): mysql-shell-%: %-dbshell
+$(addprefix mysql-shell-, $(DB_SERVICES_LIST)): mysql-shell-%: %-dbshell
 
-$(addprefix healthchecks., $(ALL_SERVICES)): healthchecks.%: dev.check.%
+$(addprefix healthchecks., $(ALL_SERVICES_LIST)): healthchecks.%: dev.check.%
 
-$(addprefix dev.provision.services., $(ALL_SERVICES)): dev.provision.services.%: dev.provision.%
+$(addprefix dev.provision.services., $(ALL_SERVICES_LIST)): dev.provision.services.%: dev.provision.%
 
 
 #####################################################################
@@ -96,3 +97,17 @@ stats: dev.stats
 static: dev.static
 
 check-memory: dev.check-memory
+
+stop-marketing: dev.stop
+
+down-marketing: dev.down
+
+up-marketing-detached: dev.up.$(DEFAULT_SERVICES)+marketing
+
+up-marketing: dev.up.attach.marketing
+
+help-marketing:
+	@echo "This command is deprecated."
+	@echo "All Marketing Site commands can be expressed using the standard Devstack command format."
+	@echo "For example, 'make dev.up.marketing' brings up the Marketing Site service,"
+	@echo "and 'make dev.shell.marketing' creates a shell into it."
