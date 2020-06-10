@@ -88,6 +88,19 @@ lms \
 registrar \
 studio
 
+# List of all services with static assets to be built.
+# Separated by spaces. In alphabetical for clarity.
+# Services must provide a Makefile target named: $(service)-update-db
+# Note: This list should contain _all_ db-backed services, even if not
+# configured to run; the list will be filtered later against $(DEFAULT_SERVICES)
+ASSET_SERVICES ?=\
+credentials \
+discovery \
+ecommerce \
+lms \
+registrar \
+studio
+
 # Include local overrides to options.
 # You can use this file to configure your Devstack. It is ignored by git.
 -include options.local.mk  # Prefix with hyphen to tolerate absence of file.

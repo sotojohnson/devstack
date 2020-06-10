@@ -405,11 +405,11 @@ already being correcty provisioned.
 So, when in doubt, it may still be best to run the full ``make dev.provision``.
 
 Sometimes you may need to restart a particular application server. To do so,
-simply use the ``make dev.restart.%`` command:
+simply use the ``make dev.restart-service.%`` command:
 
 .. code:: sh
 
-    make dev.restart.<service>
+    make dev.restart-service.<service>
 
 In all the above commands, ``<service>`` should be replaced with one of the following:
 

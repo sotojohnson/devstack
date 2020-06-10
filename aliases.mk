@@ -6,82 +6,104 @@
         provision pull pull.analytics_pipeline pull.xqueue restore stats stop \
         stop.all stop.analytics_pipeline stop.watchers stop.xqueue validate
 
-ALIAS_MSG_COL=\033[1;34m# Bold blue
-ALIAS_CMD_COL=\033[1;36m# Bold cyan
-NO_COL=\033[0m 
-
-alias_%:
-	@printf "$${ALIAS_MSG_COL}%s $${ALIAS_CMD_COL}%s$${NO_COL}\n" \
-		'This Devstack make target is an alias to:' \
-		'make $*'
-	# make $*
-
 
 #####################################################################
 # Support prefix form:
-# <service>-<action> instead of dev.<action>.<services>
+# $service-$action instead of dev.$action.$services
 #####################################################################
 
-$(addsuffix -logs, $(ALL_SERVICES)): %-logs: alias_dev.logs.%
+$(addsuffix -logs, $(ALL_SERVICES)): %-logs: dev.logs.%
 
-$(addsuffix -shell, $(ALL_SERVICES)): %-shell: alias_dev.shell.%
+$(addsuffix -shell, $(ALL_SERVICES)): %-shell: dev.shell.%
 
-$(addprefix -dbshell, $(DB_SERVICES)): %-dbshell: alias_dev.dbshell.%
+$(addsuffix -dbshell, $(DB_SERVICES)): %-dbshell: dev.dbshell.%
+
+$(addsuffix -migrate, $(DB_SERVICES)): %-migrate: dev.migrate.%
+
+$(addsuffix -restart-service, $(DB_SERVICES)): %-restart-service: dev.restart-service.%
+
+$(addsuffix -restart-devserver, $(ALL_SERVICES)): %-restart-devserver: dev.restart-devserver.%
+
+$(addsuffix -attach, $(ALL_SERVICES)): %-attach: dev.attach.%
 
 
 #####################################################################
-#
+# Support for commands that were renamed.
 #####################################################################
 
-provision: alias_dev.provision
+$(addsuffix -update-db, $(DB_SERVICES)): %-update-db: %-migrate
 
-logs: alias_dev.logs
+$(addprefix mysql-shell-, $(DB_SERVICES)): mysql-shell-%: %-dbshell
 
-down: alias_dev.down
+$(addprefix healthchecks., $(ALL_SERVICES)): healthchecks.%: dev.check.%
 
-stop: alias_dev.stop
+$(addprefix dev.provision.services., $(ALL_SERVICES)): dev.provision.services.%: dev.provision.%
 
-$(addprefix mysql-shell-, $(DB_SERVICES)): mysql-shell-%: alias_dev.dbshell.%
+lms-restart: dev.restart-devserver.lms
 
-dev.up.all: alias_dev.up.with-watchers
+studio-restart: dev.restart-devserver.studio
 
-stop.all: alias_dev.stop
+xqueue-restart: dev.restart-devserver.xqueue
 
-stop.xqueue: alias_dev.stop.xqueue+xqueue_consumer
+xqueue_consumer-restart: dev.restart-devserver.xqueue_consumer
 
-stop.watchers: alias_dev.stop.lms_watcher+studio_watcher
+dev.up.all: dev.up.with-watchers
 
-pull: alias_dev.pull
+stop.all: dev.stop
 
-pull.xqueue: alias_dev.pull.without-deps.xqueue+xqueue_consumer
+stop.xqueue: dev.stop.xqueue+xqueue_consumer
 
-backup: alias_dev.backup
+stop.watchers: dev.stop.lms_watcher+studio_watcher
 
-restore: alias_dev.restore
+pull.xqueue: dev.pull.without-deps.xqueue+xqueue_consumer
 
-validate: alias_dev.validate
+dev.provision.analytics_pipeline: dev.provision.services.analyticspipeline
 
-destroy: alias_dev.destroy
+analytics-pipeline-shell: analyticspipeline-shell
 
-healthchecks: alias_dev.check
+dev.up.analytics_pipeline: dev.up.analyticspipeline
 
-healthchecks.%:
-	make alias_dev.check.$*
+pull.analytics_pipeline: dev.pull.analyticspipeline
 
-dev.provision.analytics_pipeline: alias_dev.provision.services.analyticspipeline
+stop.analytics_pipeline: dev.stop.namenode+datanode+resourcemanager+nodemanager+sparkmaster+sparkworker+vertica+analyticspipeline
 
-analytics-pipeline-shell: alias_analyticspipeline-shell
+dev.validate: dev.validate-config
 
-dev.up.analytics_pipeline: alias_dev.up.analyticspipeline
+dev.repo.reset: dev.reset.repos
 
-pull.analytics_pipeline: alias_dev.pull.analyticspipeline
+dev.up.watchers: dev.up.lms_watcher+studio_watcher
 
-stop.analytics_pipeline: alias_dev.stop.namenode+datanode+resourcemanager+nodemanager+sparkmaster+sparkworker+vertica+analyticspipeline ## Stop all Analytics pipeline services.
 
-stats: alias_dev.stats
+#####################################################################
+# Support commands that were not prefixed with `dev`, but now are.
+#####################################################################
 
-feature-toggle-state: alias_dev.feature-toggle-state
+provision: dev.provision
 
-create-test-course: alias_dev.create-test-course
+logs: dev.logs
 
-build-courses: alias_dev.build-courses
+down: dev.down
+
+stop: dev.stop
+
+backup: dev.backup
+
+restore: dev.restore
+
+validate: dev.validate
+
+destroy: dev.destroy
+
+healthchecks: dev.check
+
+pull: dev.pull
+
+stats: dev.stats
+
+static: dev.static
+
+check-memory: dev.check-memory
+
+#####################################################################
+# Support for miscellaneous commands.
+#####################################################################
