@@ -2,28 +2,38 @@
 # Included into Makefile and exported to command environment.
 # Defaults are listed in this file.
 # Local git-ignored overrides can be configured by creating `options.local.mk`.
-# Variables are set here with ?= to allow for overriding them on the command line.
+
+# WHEN ADDING NEW OPTIONS TO THIS FILE:
+# * Provide an explanation of what the option is for.
+# * Explain what values it can be overriden to.
+# * Set the default value with `?=` to allow.
+#   This prevents us from clobbering the value if it is already defined,
+#   allowing overrides to be passed in via the command line.
 
 # Folder in which we looks for repositories.
-# Defaults to parent.
+# Defaults to parent of this repository.
 DEVSTACK_WORKSPACE ?= $(shell pwd)/..
 
 # Name of Docker Compose project.
+# Volumes and network are namespaced based on this value,
+# so changing it will give you a separate set of databases.
 # See https://docs.docker.com/compose/reference/envvars/#compose_project_name
 # Defaults to 'devstack' should OPENEDX_RELEASE not be defined.
+# Bring down services before changing the value of `COMPOSE_PROJECT_NAME`.
 ifdef OPENEDX_RELEASE
 	COMPOSE_PROJECT_NAME ?= devstack-${OPENEDX_RELEASE}
 else
 	COMPOSE_PROJECT_NAME ?= devstack
 endif
 
-# increase Docker Compose HTTP timeout so that devstack provisioning does not fail in unstable networks
-COMPOSE_HTTP_TIMEOUT=180
+# Docker Compse HTTP timeout, in seconds.
+# By default, increased so that devstack provisioning does not fail in unstable networks.
+COMPOSE_HTTP_TIMEOUT ?= 180
 
 # Whether we should always copy programs to LMS cache upon LMS startup.
 # If 'true', then run `make dev.cache-programs` whenever we bring up
 # containers.
-# Defaults to false.
+# Defaults to false. Case-sensitive.
 ALWAYS_CACHE_PROGRAMS ?= false
 
 # FileSystem Synchronization Strategy.
@@ -33,73 +43,45 @@ ALWAYS_CACHE_PROGRAMS ?= false
 # and 'docker-sync' the least.
 FS_SYNC_STRATEGY ?= local-mounts
 
-# List of all edX services.
-# Separated by spaces. In alphabetical for clarity.
-ALL_SERVICES ?=\
-analyticspipeline+\
-credentials+\
-discovery+\
-ecommerce+\
-edx_notes_api+\
-forum+\
-frontendapp-publisher +\
-frontendapp-learning +\
-gradebook+\
-lms+\
-marketing+\
-programconsole +\
-registrar+\
-registrarworker +\
-studio+\
-xqueue+\
-xqueue_consumer
+# All services, whether or not they are run by default.
+# Separated by plus signs.
+# Organized the same as their definitions in the Docker Compose YAML files, for clarity.
+_third_party_services := chrome+devpi+elasticsearch+elasticsearch-5+firefox+memcached+mongo+mysql+mysql57+redis
+_edx_services := credentials+discovery+ecommerce+edx_notes_api+forum+lms+registrar+registrar-worker+studio
+_analytics_services := namenode+datanode+resourcemanager+nodemanager+sparkmaster+sparkworker+vertica+analyticspipeline
+_microfrontends := frontend-app-learning+frontend-app-publisher+gradebook+program-console
+_xqueue_services := xqueue+xqueue_consumer
+_watcher_services := lms_watcher+studio_watcher
+_marketing_services := marketing
+ALL_SERVICES := $(_third_party_services)+$(_edx_services)+$(_microfrontends)+$(_xqueue_services)+$(_watcher_services)+$(_marketing_services)
 
-# List of all services with database migrations.
-# Separated by plus-signs. In alphabetical for clarity.
+# Services with database migrations.
+# Should be a subset of $(ALL_SERVICES).
+# Separated by plus signs. Listed in alphabetical order for clarity.
 # Services must provide a Makefile target named: $(service)-update-db
 # Note: This list should contain _all_ db-backed services, even if not
-# configured to run; the list will be filtered later against $(DEFAULT_SERVICES)
-DB_SERVICES ?=\
-credentials+\
-discovery+\
-ecommerce+\
-lms+\
-registrar+\
-studio
+# configured to run; the list will be filtered later against $(DEFAULT_SERVICES).
+DB_SERVICES ?= \
+credentials+discovery+ecommerce+lms+registrar+studio
 
-# List of all services with static assets to be built.
-# Separated by plus-signs. In alphabetical for clarity.
-# Services must provide a Makefile target named: $(service)-update-db
-# Note: This list should contain _all_ db-backed services, even if not
-# configured to run; the list will be filtered later against $(DEFAULT_SERVICES)
-ASSET_SERVICES ?=\
-credentials+\
-discovery+\
-ecommerce+\
-lms+\
-registrar+\
-studio
+# Services with static assets to be built.
+# Should be a subset of $(ALL_SERVICES).
+# Services must provide a Makefile target named: dev.migrate.$(service)
+# Separated by plus signs. Listed in alphabetical order for clarity.
+# Note: This list should contain _all_ services with static asse to compile ts, even if not
+# configured to run; the list will be filtered later against $(DEFAULT_SERVICES).
+ASSET_SERVICES ?= \
+credentials+discovery+ecommerce+lms+registrar+studio
 
-# Services that are pulled, provisioned, run, and checked by default
+# Services that are to be pulled, provisioned, run, and checked by default
 # when no services are specified manually.
-# Separated by plus-signs. In alphabetical for clarity.
-# Should be a subset of services listed in ALL_SERVICES.
+# Should be a subset of $(ALL_SERVICES).
+# Separated by plus signs. Listed in alphabetical order for clarity.
 # TODO: Re-evaluate this list and consider paring it down to a tighter core.
 #       The current value was chosen such that it would not change the existing
 #       Devstack behavior.
-DEFAULT_SERVICES ?=\
-credentials\
-discovery+\
-ecommerce+\
-edx_notes_api+\
-forum+\
-frontend-app-publisher+\
-frontend-app-learning+\
-gradebook+\
-lms+\
-program-console+\
-registrar+\
-studio
+DEFAULT_SERVICES ?= \
+credentials+discovery+ecommerce+edx_notes_api+forum+frontend-app-publisher+frontend-app-learning+gradebook+lms+program-console+registrar+studio
 
 # Include local overrides to options.
 # You can use this file to configure your Devstack. It is ignored by git.

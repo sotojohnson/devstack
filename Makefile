@@ -8,24 +8,25 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: analytics-pipeline-devstack-test dev.check-memory dev.backup \
-        dev.build-courses dev.cache-programs dev.check dev.checkout dev.clone \
-        dev.clone.ssh dev.create-test-course dev.destroy dev.down \
-        dev.feature-toggle-state dev.kill dev.logs dev.nfs.setup \
-        devpi-password dev.provision dev.provision.services \
-        dev.provision.xqueue dev.ps dev.pull dev.repo.reset dev.reset \
-        dev.restart dev.restore dev.rm-stopped dev.shell.analyticspipeline \
-        dev.shell.credentials dev.shell.discovery dev.shell.e2e \
-        dev.shell.ecommerce dev.shell.lms dev.shell.lms-watcher \
-        dev.shell.registrar dev.shell.studio dev.shell.studio-watcher \
-        dev.shell.xqueue dev.shell.xqueue_consumer dev.stats dev.status \
-        dev.stop dev.sync.daemon.start dev.sync.provision \
-        dev.sync.requirements dev.sync.up dev.up dev.up.watchers \
-        dev.up.with-programs dev.up.with-watchers dev.validate e2e-tests \
-        forum-restart-devserver help lms-restart lms-static lms-update-db \
-        requirements selfcheck static studio-restart studio-static \
-        studio-update-db update-db upgrade upgrade validate-lms-volume \
-        vnc-passwords xqueue_consumer-restart xqueue-restart
+.PHONY: analytics-pipeline-devstack-test build-courses clean-marketing-sync \
+        create-test-course dev.attach dev.backup dev.cache-programs dev.check \
+        dev.check-memory dev.checkout dev.clone dev.clone.ssh dev.destroy \
+        dev.down dev.kill dev.logs dev.migrate dev.migrate.lms \
+        dev.migrate.studio dev.nfs.setup devpi-password dev.provision dev.ps \
+        dev.pull dev.pull.without-deps dev.reset dev.reset-repos \
+        dev.restart-containers dev.restart-devserver \
+        dev.restart-devserver.forum dev.restore dev.rm-stopped dev.shell \
+        dev.shell dev.shell.analyticspipeline dev.shell.credentials \
+        dev.shell.discovery dev.shell.e2e dev.shell.ecommerce dev.shell.lms \
+        dev.shell.lms-watcher dev.shell.marketing dev.shell.registrar \
+        dev.shell.studio dev.shell.studio-watcher dev.shell.xqueue \
+        dev.shell.xqueue_consumer dev.static dev.static.lms dev.static.studio \
+        dev.stats dev.status dev.stop dev.sync.daemon.start dev.sync.provision \
+        dev.sync.requirements dev.sync.up dev.up dev.up.attach \
+        dev.up.without-deps dev.up.with-programs dev.up.with-watchers \
+        dev.validate-config e2e-tests feature-toggle-state help requirements \
+        selfcheck upgrade upgrade up-marketing-sync validate-lms-volume \
+        vnc-passwords
 
 # Colors for Make messages.
 RED="\033[0;31m"
@@ -38,6 +39,7 @@ include options.mk
 
 # These `*_SERVICES_LIST` variables are equivalent to their `*_SERVICES` counterparts,
 # but with spaces for separators instead of plus-signs.
+ALL_SERVICES_LIST := $(subst +, ,$(ALL_SERVICES))
 DEFAULT_SERVICES_LIST := $(subst +, ,$(DEFAULT_SERVICES))
 DB_SERVICES_LIST := $(subst +, ,$(DB_SERVICES))
 ASSET_SERVICES_LIST := $(subst +, ,$(ASSET_SERVICES))
@@ -131,6 +133,7 @@ upgrade: ## Upgrade requirements with pip-tools
 
 selfcheck: ## check that the Makefile is well-formed
 	@echo "The Makefile is well-formed."
+	echo $(DEFAULT_SERVICES)
 
 
 #####################################################################
@@ -159,6 +162,8 @@ dev.clone.ssh: ## Clone service repos using SSH method to the parent directory
 ########################################################################################
 
 dev.pull: dev.pull.$(DEFAULT_SERVICES) ## Pull Docker images required by default services.
+
+dev.pull.without-deps: _expects-service-list.dev.pull.without-deps
 
 dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by plus-signs).
 	docker-compose pull $$(echo $* | tr + " ")
@@ -195,12 +200,12 @@ dev.restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from t
 # List of Makefile targets to run database migrations, in the form dev.migrate.$(service)
 # Services will only have their migrations added here
 # if the service is present in both $(DEFAULT_SERVICES_LIST) and $(DB_SERVICES_LIST).
-DB_MIGRATION_TARGETS = \
+_db_migration_targets = \
 $(foreach db_service,$(DB_SERVICES_LIST),\
 	$(if $(filter $(db_service), $(DEFAULT_SERVICES_LIST)),\
 		dev.migrate.$(db_service)))
 
-dev.migrate: | $(DB_MIGRATION_TARGETS)
+dev.migrate: | $(_db_migration_targets)
 
 dev.migrate.studio: ## Run migrations for Studio.
 	docker-compose exec studio bash -c 'source /edx/app/edxapp/edxapp_env && cd /edx/app/edxapp/edx-platform/ && paver update_db'
@@ -224,6 +229,8 @@ ifeq ($(ALWAYS_CACHE_PROGRAMS),true)
 	make dev.cache-programs
 endif
 
+dev.up.attach: _expects-service.dev.up.attach
+
 dev.up.attach.%: ## Bring up specific service and its dependencies and attach to it.
 	docker-compose up $*
 
@@ -236,6 +243,8 @@ dev.up.with-watchers: dev.up.$(DEFAULT_SERVICES)+lms_watcher+studio_watcher ## B
 dev.up.with-watchers.%: ## Bring up default services with LMS and Studio asset watcher containers.
 	make dev.up.$*
 	make dev.up.lms_watcher+studio_watcher
+
+dev.up.without-deps: _expects-service-list.dev.up.without-deps
 
 dev.up.without-deps.%: dev.check-memory ## Bring up specific services (separated by plus-signs) without starting dependent services.
 	docker-compose up --d --no-deps $$(echo $* | tr + " ")
@@ -269,12 +278,12 @@ dev.kill.%: ## Kill specific services, separated by plus-signs.
 dev.rm-stopped: ## Remove stopped containers. Does not affect running containers.
 	docker-compose rm --force
 
-dev.down.%: ## Stop and remove specific services, separated by plus-signs.
-	docker-compose rm --force --stop $$(echo $* | tr + " ")
-
 dev.down: ## Stop and remove all service containers and networks
 	(test -d .docker-sync && docker-sync clean) || true ## Ignore failure here
 	docker-compose down
+
+dev.down.%: ## Stop and remove specific services, separated by plus-signs.
+	docker-compose rm --force --stop $$(echo $* | tr + " ")
 
 
 #####################################################################
@@ -302,6 +311,8 @@ dev.validate-config: ## Validate the devstack configuration
 
 dev.cache-programs: ## Copy programs from Discovery to Memcached for use in LMS.
 	$(WINPTY) bash ./programs/provision.sh cache
+
+dev.restart-devserver: _expects-service.dev.restart-devserver
 
 dev.restart-devserver.forum: ## Kill the forum's Sinatra development server. The watcher process will restart it.
 	docker-compose exec forum bash -c 'kill $$(ps aux | grep "ruby app.rb" | egrep -v "while|grep" | awk "{print \$$2}")'
@@ -354,11 +365,17 @@ dev.shell.xqueue_consumer: ## Run a shell on the XQueue consumer container
 dev.shell.marketing: ## Run a shell on the marketing site container
 	docker-compose exec marketing env TERM=$(TERM) bash -c 'cd /edx/app/edx-mktg/edx-mktg; exec /bin/bash -sh'
 
+dev.shell: _expects-service.dev.shell
+
 dev.shell.%: ## Run a shell on the specified service container.
 	docker-compose exec $* /bin/bash
 
+dev.shell: _expects-service.dev.dbshell
+
 dev.dbshell.%: ## Run a SQL shell on the given service's database.
 	docker-compose exec mysql bash -c "mysql $*"
+
+dev.attach: _expects-service.dev.attach
 
 dev.attach.%: ## Attach to the specified service container process to use the debugger & see logs.
 	docker attach "$$(make --silent dev.print-container.$*)"
@@ -366,12 +383,12 @@ dev.attach.%: ## Attach to the specified service container process to use the de
 # List of Makefile targets to run static asset generation, in the form dev.static.$(service)
 # Services will only have their asset generation added here
 # if the service is present in both $(DEFAULT_SERVICES) and $(ASSET_SERVICES).
-ASSET_COMPILATION_TARGETS = \
-$(foreach db_service,$(ASSET_SERVICES),\
-	$(if $(filter $(asset_service), $(DEFAULT_SERVICES)),\
-		dev.migrate.$(asset_service)))
+_asset_compilation_targets = \
+$(foreach asset_service,$(ASSET_SERVICES_LIST),\
+	$(if $(filter $(asset_service), $(DEFAULT_SERVICES_LIST)),\
+		dev.static.$(asset_service)))
 
-dev.static: | $(ASSET_COMPILATION_TARGETS)
+dev.static: | $(_asset_compilation_targets)
 
 dev.static.lms: ## Rebuild static assets for the LMS container
 	docker-compose exec lms bash -c 'source /edx/app/edxapp/edxapp_env && cd /edx/app/edxapp/edx-platform/ && paver update_assets lms'
@@ -442,6 +459,25 @@ $(addsuffix -restart-container, $(DB_SERVICES_LIST)): %-restart-container: dev.r
 $(addsuffix -restart-devserver, $(ALL_SERVICES_LIST)): %-restart-devserver: dev.restart-devserver.%
 
 $(addsuffix -attach, $(ALL_SERVICES_LIST)): %-attach: dev.attach.%
+
+
+########################################################################################
+# Helper targets for other targets to use.
+########################################################################################
+
+_expects-service.%:
+	@echo "'make $*' on its own has no effect."
+	@echo "It expects a service as a suffix."
+	@echo "For example:"
+	@echo "    make $*.lms"
+
+_expects-service-list.%:
+	@echo "'make $*' on its own has no effect."
+	@echo "It expects one or more services as a suffix, separated by plus-signs."
+	@echo "For example:"
+	@echo "    make $*.lms"
+	@echo "Or:"
+	@echo "    make $*.registrar+ecommerce+studio"
 
 
 #####################################################################
