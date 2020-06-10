@@ -33,22 +33,61 @@ ALWAYS_CACHE_PROGRAMS ?= false
 # and 'docker-sync' the least.
 FS_SYNC_STRATEGY ?= local-mounts
 
+# List of all edX services.
+# Separated by spaces. In alphabetical for clarity.
+ALL_SERVICES ?=\
+analyticspipeline \
+credentials \
+discovery \
+ecommerce \
+edx_notes_api \
+forum \
+frontend-app-publisher \
+frontend-app-learning \
+gradebook \
+lms \
+marketing \
+program-console \
+registrar \
+registrar-worker \
+studio \
+xqueue \
+xqueue_consumer
+
 # Services that are pulled, provisioned, run, and checked by default
 # when no services are specified manually.
+# Separated by spaces. In alphabetical for clarity.
+# Should be a subset of services listed in ALL_SERVICES.
 # TODO: Re-evaluate this list and consider paring it down to a tighter core.
 #       The current value was chosen such that it would not change the existing
 #       Devstack behavior.
-DEFAULT_SERVICES ?= lms+studio+ecommerce+discovery+credentials+forum+edx_notes_api+registrar+gradebook+program-console+frontend-app-publisher
+DEFAULT_SERVICES ?=\
+credentials \
+discovery \
+ecommerce \
+edx_notes_api \
+forum \
+frontend-app-publisher \
+frontend-app-learning \
+gradebook \
+lms \
+program-console \
+registrar \
+studio
 
 # List of all services with database migrations.
+# Separated by spaces. In alphabetical for clarity.
 # Services must provide a Makefile target named: $(service)-update-db
 # Note: This list should contain _all_ db-backed services, even if not
 # configured to run; the list will be filtered later against $(DEFAULT_SERVICES)
-DB_SERVICES ?= credentials discovery ecommerce lms registrar studio
+DB_SERVICES ?=\
+credentials \
+discovery \
+ecommerce \
+lms \
+registrar \
+studio
 
-# List of Makefile targets to run database migrations, in the form $(service)-update-db
-# Services will only have their migrations added here
-# if the service is present in both $(DEFAULT_SERVICES) and $(DB_SERVICES).
-DB_MIGRATION_TARGETS = $(foreach db_service,$(DB_SERVICES),\
-	$(if $(filter $(db_service),$(subst +, ,$(DEFAULT_SERVICES))),\
-		$(db_service)-update-db))
+# Include local overrides to options.
+# You can use this file to configure your Devstack. It is ignored by git.
+-include options.local.mk  # Prefix with hyphen to tolerate absence of file.

@@ -16,13 +16,34 @@ alias_%:
 		'make $*'
 	# make $*
 
-dev.up.all: alias_dev.up.with-watchers
+
+#####################################################################
+# Support prefix form:
+# <service>-<action> instead of dev.<action>.<services>
+#####################################################################
+
+$(addsuffix -logs, $(ALL_SERVICES)): %-logs: alias_dev.logs.%
+
+$(addsuffix -shell, $(ALL_SERVICES)): %-shell: alias_dev.shell.%
+
+$(addprefix -dbshell, $(DB_SERVICES)): %-dbshell: alias_dev.dbshell.%
+
+
+#####################################################################
+#
+#####################################################################
 
 provision: alias_dev.provision
+
+logs: alias_dev.logs
 
 down: alias_dev.down
 
 stop: alias_dev.stop
+
+$(addprefix mysql-shell-, $(DB_SERVICES)): mysql-shell-%: alias_dev.dbshell.%
+
+dev.up.all: alias_dev.up.with-watchers
 
 stop.all: alias_dev.stop
 
@@ -64,11 +85,3 @@ feature-toggle-state: alias_dev.feature-toggle-state
 create-test-course: alias_dev.create-test-course
 
 build-courses: alias_dev.build-courses
-
-logs: alias_dev.logs
-
-%-shell: alias_dev.shell.%
-	#make alias_dev.$*.shell
-
-mysql-shell-%:
-	make alias_dev.shell.mysql.%

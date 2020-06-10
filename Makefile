@@ -25,12 +25,26 @@
         studio-update-db update-db upgrade upgrade validate-lms-volume \
         vnc-passwords xqueue_consumer-restart xqueue-restart
 
+# Colors for Make messages.
+RED="\033[0;31m"
+YELLOW="\033[0;33m"
+GREY="\033[1;90m"
+NO_COLOR="\033[0m"
+
 # Include options (configurable through options.local.mk)
 include options.mk
 
-# Include local overrides to options.
-# You can use this file to configure your Devstack. It is ignored by git.
--include options.local.mk  # Prefix with hyphen to tolerate absence of file.
+# List of Makefile targets to run database migrations, in the form $(service)-update-db
+# Services will only have their migrations added here
+# if the service is present in both $(DEFAULT_SERVICES) and $(DB_SERVICES).
+DB_MIGRATION_TARGETS = \
+$(foreach db_service,$(DB_SERVICES),\
+	$(if $(filter $(db_service), $(DEFAULT_SERVICES)),\
+		$(db_service)-update-db))
+
+# This is equal to DEFAULT_SERVICES, but separated with plus signs,
+# as commands like `make dev.up.%` and `make dev.pull.%` expect.
+DEFAULT_SERVICE_LIST = $(subst  ,+,$(DEFAULT_SERVICES))
 
 # Docker Compose YAML files to define services and their volumes.
 # This environment variable tells `docker-compose` which files to load definitions
@@ -89,13 +103,8 @@ else
     DEVNULL := >/dev/null
 endif
 
-RED="\033[0;31m"
-YELLOW="\033[0;33m"
-GREY="\033[1;90m"
-NO_COLOR="\033[0m"
-
-# TODO document
-include completion.mk
+# Export Makefile variables to recipe shells.
+export
 
 # Include redundant targets as aliases to commands in this Makefile.
 # These are split out into order to make this Makefile more approachable
@@ -104,9 +113,6 @@ include aliases.mk
 
 # Include local makefile with additional targets.
 -include local.mk  # Prefix with hyphen to tolerate absence of file.
-
-# Export Makefile variables to recipe shells.
-export
 
 # Generates a help message. Borrowed from https://github.com/pydanny/cookiecutter-djangopackage.
 help: ## Display this help message
@@ -139,10 +145,10 @@ dev.clone.ssh: ## Clone service repos using SSH method to the parent directory
 
 dev.provision.services: ## Provision default services with local mounted directories
 	# We provision all default services as well as 'e2e' (end-to-end tests).
-	# e2e is not part of `DEFAULT_SERVICES` because it isn't a service;
+	# e2e is not part of `DEFAULT_SERVICE_LIST` because it isn't a service;
 	# it's just a way to tell ./provision.sh that the fake data for end-to-end
 	# tests should be prepared.
-	$(WINPTY) bash ./provision.sh $(DEFAULT_SERVICES)+e2e
+	$(WINPTY) bash ./provision.sh $(DEFAULT_SERVICE_LIST)+e2e
 
 dev.provision.services.%: ## Provision specified services with local mounted directories, separated by plus signs
 	$(WINPTY) bash ./provision.sh $*
@@ -162,7 +168,7 @@ dev.status: ## Prints the status of all git repositories
 dev.repo.reset: ## Attempts to reset the local repo checkouts to the master working state
 	$(WINPTY) bash ./repo.sh reset
 
-dev.pull: dev.pull.$(DEFAULT_SERVICES) ## Pull Docker images required by default services.
+dev.pull: dev.pull.$(DEFAULT_SERVICE_LIST) ## Pull Docker images required by default services.
 
 dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by plus-signs).
 	docker-compose pull $$(echo $* | tr + " ")
@@ -170,7 +176,7 @@ dev.pull.without-deps.%: ## Pull latest Docker images for services (separated by
 dev.pull.%: ## Pull latest Docker images for services (separated by plus-signs) and all their dependencies.
 	docker-compose pull --include-deps $$(echo $* | tr + " ")
 
-dev.up: dev.up.$(DEFAULT_SERVICES) check-memory ## Bring up default services.
+dev.up: dev.up.$(DEFAULT_SERVICE_LIST) check-memory ## Bring up default services.
 
 dev.up.%: check-memory ## Bring up specific services (separated by plus-signs) and their dependencies with host volumes.
 	docker-compose up -d $$(echo $* | tr + " ")
@@ -210,7 +216,7 @@ dev.sync.requirements: ## Install requirements
 dev.sync.up: dev.sync.daemon.start ## Bring up all services with docker-sync enabled
 	FS_SYNC_STRATEGY=docker-sync make dev.up
 
-dev.check: dev.check.$(DEFAULT_SERVICES) ## Run checks for the default service set.
+dev.check: dev.check.$(DEFAULT_SERVICE_LIST) ## Run checks for the default service set.
 
 dev.check.%:  # Run checks for a given service or set of services (separated by plus-signs).
 	$(WINPTY) bash ./check.sh $*
@@ -248,8 +254,8 @@ dev.down: ## Stop and remove all service containers and networks
 dev.destroy: ## Remove all devstack-related containers, networks, and volumes
 	$(WINPTY) bash ./destroy.sh
 
-dev.logs:  ## View logs from containers running in detached mode.
-	docker-compose logs -f
+#dev.logs:  ## View logs from containers running in detached mode.
+	#docker-compose logs -f
 
 dev.logs.%: ## View the logs of the specified service container
 	docker-compose logs -f --tail=500 $*
@@ -259,7 +265,7 @@ dev.validate: ## Validate the devstack configuration
 
 dev.backup: dev.up.mysql+mongo+elasticsearch ## Write all data volumes to the host.
 	docker run --rm --volumes-from $$(make -s dev.print-container.mysql) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mysql.tar.gz /var/lib/mysql
-	docker run --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mongo.tar.gz /data/db
+	docker runsql --rm --volumes-from $$(make -s dev.print-container.mongo) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/mongo.tar.gz /data/db
 	docker run --rm --volumes-from $$(make -s dev.print-container.elasticsearch) -v $$(pwd)/.dev/backups:/backup debian:jessie tar zcvf /backup/elasticsearch.tar.gz /usr/share/elasticsearch/data
 
 dev.restore: dev.up.mysql+mongo+elasticsearch ## Restore all data volumes from the host. WARNING: THIS WILL OVERWRITE ALL EXISTING DATA!
@@ -303,14 +309,14 @@ dev.shell.studio-watcher: ## Run a shell on the studio watcher container
 dev.shell.xqueue_consumer: ## Run a shell on the XQueue consumer container
 	docker-compose exec xqueue_consumer env TERM=$(TERM) /edx/app/xqueue/devstack.sh open
 
-dev.shell.mysql.%: ## Run a mysql shell on the edxapp database
-	docker-compose exec mysql bash -c "mysql $*"
-
 dev.shell.marketing: ## Run a shell on the marketing site container
 	docker-compose exec marketing env TERM=$(TERM) bash -c 'cd /edx/app/edx-mktg/edx-mktg; exec /bin/bash -sh'
 
 dev.shell.%: ## Run a shell on the specified service container.
 	docker-compose exec $* /bin/bash
+
+dev.dbshell.%: ## Run a SQL shell on the given service's database.
+	docker-compose exec mysql bash -c "mysql $*"
 
 %-update-db: ## Run migrations for the specified service container
 	docker-compose exec $* bash -c 'source /edx/app/$*/$*_env && cd /edx/app/$*/$*/ && make migrate'
@@ -321,7 +327,7 @@ studio-update-db: ## Run migrations for the Studio container
 lms-update-db: ## Run migrations LMS container
 	docker-compose exec lms bash -c 'source /edx/app/edxapp/edxapp_env && cd /edx/app/edxapp/edx-platform/ && paver update_db'
 
-update-db: | $(DB_MIGRATION_TARGETS) ## Run the migrations for DEFAULT_SERVICES
+update-db: | $(DB_MIGRATION_TARGETS) ## Run the migrations for DEFAULT_SERVICE_LIST
 
 forum-restart-devserver: ## Kill the forum's Sinatra development server. The watcher process will restart it.
 	docker-compose exec forum bash -c 'kill $$(ps aux | grep "ruby app.rb" | egrep -v "while|grep" | awk "{print \$$2}")'

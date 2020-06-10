@@ -1,9 +1,6 @@
 
 credentials-: ;
 
-credentials-%:
-	make dev.$*.credentials
-
 discovery-: ;
 
 discovery-%:
