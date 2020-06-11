@@ -38,6 +38,10 @@ $(addprefix dev.provision.services., $(ALL_SERVICES_LIST)): dev.provision.servic
 # Non-generic tagets.
 #####################################################################
 
+studio-watcher-shell: dev.shell.studio_watcher
+
+lms-watcher-shell: dev.shell.lms_watcher
+
 lms-restart: dev.restart-devserver.lms
 
 studio-restart: dev.restart-devserver.studio
@@ -66,8 +70,6 @@ pull.analytics_pipeline: dev.pull.analyticspipeline
 
 stop.analytics_pipeline: dev.stop.namenode+datanode+resourcemanager+nodemanager+sparkmaster+sparkworker+vertica+analyticspipeline
 
-dev.validate: dev.validate-config
-
 dev.repo.reset: dev.reset-repos
 
 dev.up.watchers: dev.up.lms_watcher+studio_watcher
@@ -77,6 +79,8 @@ provision: dev.provision
 logs: dev.logs
 
 down: dev.down
+
+e2e-shell: e2e-tests.with-shell
 
 stop: dev.stop
 
